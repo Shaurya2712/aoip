@@ -1,0 +1,29 @@
+# Render Blueprint — optional one-click deploy
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: aoip-backend
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: REDDIT_CLIENT_ID
+        sync: false
+      - key: REDDIT_CLIENT_SECRET
+        sync: false
+      - key: REDDIT_USER_AGENT
+        value: AOIP/1.0
+      - key: BACKEND_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false
