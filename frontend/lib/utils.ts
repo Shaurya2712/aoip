@@ -37,4 +37,46 @@ export function formatDuration(started: string, finished: string | null): string
   return `${minutes}m ${remainingSeconds}s`
 }
 
+/** Jobs stuck as "running" with no finish time (legacy double-insert rows). */
+export const STALE_JOB_HOURS = 2
+
+export function isJobStale(job: {
+  status: string | null
+  started_at: string | null
+  finished_at: string | null
+}): boolean {
+  if (job.status?.toLowerCase() !== 'running' || job.finished_at || !job.started_at) {
+    return false
+  }
+  const ageMs = Date.now() - new Date(job.started_at).getTime()
+  return ageMs > STALE_JOB_HOURS * 60 * 60 * 1000
+}
+
+export function resolveJobDisplayStatus(job: {
+  status: string | null
+  started_at: string | null
+  finished_at: string | null
+}): string {
+  if (isJobStale(job)) return 'stale'
+  return job.status?.toLowerCase() ?? 'unknown'
+}
+
+export function formatJobDuration(
+  started: string | null,
+  finished: string | null,
+  displayStatus: string
+): string {
+  if (!started) return '—'
+  if (finished) return formatDuration(started, finished)
+  if (displayStatus === 'running') {
+    const ms = Date.now() - new Date(started).getTime()
+    const seconds = Math.floor(ms / 1000)
+    if (seconds < 60) return `${seconds}s (running)`
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = seconds % 60
+    return `${minutes}m ${remainingSeconds}s (running)`
+  }
+  return '—'
+}
+
 export const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'

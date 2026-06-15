@@ -19,21 +19,47 @@ IST = ZoneInfo("Asia/Kolkata")
 JOB_REGISTRY: dict = {}
 
 
-def log_job(job_name: str, status: str, message: str = "", started_at: datetime = None, finished_at: datetime = None):
-    """Write a job run entry to the job_log table."""
+def log_job_start(job_name: str, started_at: datetime) -> str | None:
+    """Insert a running row; returns its id for completion update."""
     try:
-        row = {
-            "job_name": job_name,
-            "status": status,
-            "message": message[:500] if message else "",
-        }
-        if started_at:
-            row["started_at"] = started_at.isoformat()
-        if finished_at:
-            row["finished_at"] = finished_at.isoformat()
-        get_db().table("job_log").insert(row).execute()
+        res = (
+            get_db()
+            .table("job_log")
+            .insert(
+                {
+                    "job_name": job_name,
+                    "status": "running",
+                    "message": "started",
+                    "started_at": started_at.isoformat(),
+                }
+            )
+            .execute()
+        )
+        return res.data[0]["id"] if res.data else None
     except Exception as e:
-        logger.error(f"Failed to log job: {e}")
+        logger.error(f"Failed to log job start: {e}")
+        return None
+
+
+def log_job_finish(
+    log_id: str | None,
+    status: str,
+    message: str,
+    finished_at: datetime,
+):
+    """Update the running row so the dashboard shows one row per run."""
+    if not log_id:
+        return
+    try:
+        get_db().table("job_log").update(
+            {
+                "status": status,
+                "message": message[:500] if message else "",
+                "finished_at": finished_at.isoformat(),
+            }
+        ).eq("id", log_id).execute()
+    except Exception as e:
+        logger.error(f"Failed to log job finish: {e}")
 
 
 def run_job(job_name: str, coro_factory):
@@ -45,19 +71,19 @@ def run_job(job_name: str, coro_factory):
         logger.info(f"Skipping {job_name} — another job is running")
         return
     started = datetime.utcnow()
-    log_job(job_name, "running", "started", started_at=started)
+    log_id = log_job_start(job_name, started)
     try:
         asyncio.run(coro_factory())
         finished = datetime.utcnow()
-        log_job(job_name, "success", "completed", started_at=started, finished_at=finished)
+        log_job_finish(log_id, "success", "completed", finished)
     except JobSkipped as e:
         finished = datetime.utcnow()
         logger.info(f"Job {job_name} skipped: {e.reason}")
-        log_job(job_name, "success", f"skipped: {e.reason}", started_at=started, finished_at=finished)
+        log_job_finish(log_id, "success", f"skipped: {e.reason}", finished)
     except Exception as e:
         finished = datetime.utcnow()
         logger.error(f"Job {job_name} failed: {e}")
-        log_job(job_name, "error", str(e), started_at=started, finished_at=finished)
+        log_job_finish(log_id, "error", str(e), finished)
     finally:
         _job_lock.release()
 

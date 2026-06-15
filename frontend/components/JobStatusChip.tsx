@@ -1,9 +1,9 @@
 // STATUS: COMPLETE
-import { Check, Loader2, X } from 'lucide-react'
+import { AlertTriangle, Check, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface JobStatusChipProps {
-  status: 'running' | 'success' | 'error' | string
+  status: 'running' | 'success' | 'error' | 'stale' | string
 }
 
 export default function JobStatusChip({ status }: JobStatusChipProps) {
@@ -14,6 +14,15 @@ export default function JobStatusChip({ status }: JobStatusChipProps) {
       <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
         <Loader2 className="h-3 w-3 animate-spin" />
         Running
+      </span>
+    )
+  }
+
+  if (normalized === 'stale') {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
+        <AlertTriangle className="h-3 w-3" />
+        Stale
       </span>
     )
   }
