@@ -27,3 +27,27 @@ services:
         generateValue: true
       - key: FRONTEND_URL
         sync: false
+      - key: GEMMA_MODEL_BULK
+        value: gemma-4-26b-a4b-it
+      - key: GEMMA_MODEL_ANALYZE
+        value: gemma-4-31b-it
+      - key: GEMMA_MAX_OUTPUT_TOKENS_BULK
+        value: "2048"
+      - key: GEMMA_MAX_OUTPUT_TOKENS_ANALYZE
+        value: "8192"
+      - key: AI_REQUESTS_PER_MINUTE
+        value: "30"
+      - key: M2_BATCH_SIZE
+        value: "8"
+      - key: M2_MAX_BATCHES_PER_RUN
+        value: "30"
+      - key: M2_REEXPAND_DAYS
+        value: "7"
+      - key: M3_MAX_KEYWORDS_PER_RUN
+        value: "24"
+      - key: M3_BATCH_SIZE
+        value: "4"
+      - key: M4_MAX_KEYWORDS_PER_RUN
+        value: "30"
+      - key: M7_MAX_KEYWORDS_PER_RUN
+        value: "30"

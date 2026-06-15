@@ -101,66 +101,71 @@ def start_scheduler():
         "daily_report": generate_daily,
     }
 
-    s = BackgroundScheduler(timezone=IST)
+    s = BackgroundScheduler(timezone=IST, job_defaults={"max_instances": 1, "coalesce": True})
 
-    # Every 6 hours: expand keywords and score trends
+    # Every 6 hours: expand keywords (capped per run — see M2_MAX_BATCHES_PER_RUN)
     s.add_job(
         lambda: run_job("keyword_expansion", m2_run),
         IntervalTrigger(hours=6),
         id="keyword_expansion",
+        max_instances=1,
     )
 
     # Every 6 hours: Google Trends scoring
     s.add_job(
         lambda: run_job("trend_analysis", m3_run),
         IntervalTrigger(hours=6),
-        id="trend_analysis"
+        id="trend_analysis",
+        max_instances=1,
     )
 
     # Every 4 hours: Play Store competitor data
     s.add_job(
         lambda: run_job("playstore_intel", m4_run),
         IntervalTrigger(hours=4),
-        id="playstore_intel"
+        id="playstore_intel",
+        max_instances=1,
     )
 
     # Every 8 hours: Mine reviews from competitors
     s.add_job(
         lambda: run_job("review_mining", m5_run),
         IntervalTrigger(hours=8),
-        id="review_mining"
+        id="review_mining",
+        max_instances=1,
     )
 
     # Every 8 hours: Reddit community research
     s.add_job(
         lambda: run_job("community_research", m6_run),
         IntervalTrigger(hours=8),
-        id="community_research"
+        id="community_research",
+        max_instances=1,
     )
 
-    # Every 12 hours: Rescore all opportunities
+    # Every 12 hours: Rescore opportunities
     s.add_job(
         lambda: run_job("opportunity_scoring", m7_run),
         IntervalTrigger(hours=12),
-        id="opportunity_scoring"
+        id="opportunity_scoring",
+        max_instances=1,
     )
 
     # Daily at 2am IST: Generate product concepts for top 20
     s.add_job(
         lambda: run_job("product_concepts", m8_run),
         CronTrigger(hour=2, minute=0, timezone="Asia/Kolkata"),
-        id="product_concepts"
+        id="product_concepts",
+        max_instances=1,
     )
 
     # Daily at 3am IST: Generate daily report
     s.add_job(
         lambda: run_job("daily_report", generate_daily),
         CronTrigger(hour=3, minute=0, timezone="Asia/Kolkata"),
-        id="daily_report"
+        id="daily_report",
+        max_instances=1,
     )
 
     s.start()
     logger.info("APScheduler started. All jobs registered.")
-
-    # Always run keyword expansion on startup (timezone-safe; Render runs UTC)
-    _run_job_async("keyword_expansion", m2_run)

@@ -9,33 +9,34 @@ import time
 from pytrends.request import TrendReq
 from db import get_db
 from ai_client import ai_bulk
+from config import M3_MAX_KEYWORDS_PER_RUN, M3_BATCH_SIZE
 
-SCORE_PROMPT = """
-You are analysing Google Trends data for a mobile app market researcher.
+BATCH_SCORE_PROMPT = """
+You are analysing Google Trends data for a mobile app market researcher (India, last 12 months).
 
-Keyword: "{keyword}"
-Country: India
-Timeframe: Last 12 months (weekly data points)
-Interest array (0-100, where 100 = peak popularity in period):
-{data}
+For EACH keyword below, compute integer scores 0-100:
+- demand_score: average search interest
+- growth_score: trend momentum (rising = high)
+- stability_score: consistency year-round
+- seasonal_score: how seasonal (spikes = high)
+- trend_score: overall weighted score
 
-Based on this data, compute these scores (all must be integers 0-100):
-
-- demand_score: The average level of search interest. High = people consistently search for this.
-- growth_score: The trend momentum. High = interest is rising sharply. Low = declining or flat.
-- stability_score: How consistent the interest is. High = steady searches year-round. Low = very volatile.
-- seasonal_score: How seasonal this keyword is. High = spikes at certain times. Low = flat all year.
-- trend_score: Your overall weighted score combining all of the above. Formula hint: (demand*0.35 + growth*0.35 + stability*0.20 - seasonal*0.10). Round to integer.
+Keywords and their interest arrays (0-100):
+{items_block}
 
 Return ONLY this JSON, nothing else:
-{{"demand_score": 0, "growth_score": 0, "stability_score": 0, "seasonal_score": 0, "trend_score": 0}}
+{{"scores": [{{"keyword": "exact keyword", "demand_score": 0, "growth_score": 0, "stability_score": 0, "seasonal_score": 0, "trend_score": 0}}]}}
 """
+
+
+def _chunks(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
 
 
 async def run():
     db = get_db()
 
-    # Get keywords not scored in last 24 hours (or never scored)
     res = (
         db.table("keywords")
         .select("id, keyword")
@@ -43,7 +44,7 @@ async def run():
             "last_scored_at.is.null,"
             "last_scored_at.lt." + "now()-interval '24 hours'"
         )
-        .limit(80)
+        .limit(M3_MAX_KEYWORDS_PER_RUN)
         .execute()
     )
 
@@ -52,38 +53,66 @@ async def run():
         return
 
     pytrends = TrendReq(hl="en-IN", tz=330, timeout=(10, 25))
+    scored_items = []
 
     for kw in res.data:
         time.sleep(12)  # pytrends rate limit — do not reduce this
         try:
-            pytrends.build_payload(
-                [kw["keyword"]], timeframe="today 12-m", geo="IN"
-            )
+            pytrends.build_payload([kw["keyword"]], timeframe="today 12-m", geo="IN")
             df = pytrends.interest_over_time()
 
             if df.empty or kw["keyword"] not in df.columns:
                 print(f"[m3] No trends data for: {kw['keyword']}")
                 continue
 
-            data_points = df[kw["keyword"]].tolist()
+            scored_items.append({
+                "id": kw["id"],
+                "keyword": kw["keyword"],
+                "data": df[kw["keyword"]].tolist(),
+            })
+        except Exception as e:
+            print(f"[m3] Trends fetch error for '{kw['keyword']}': {e}")
+            continue
 
-            scores = await ai_bulk(
-                SCORE_PROMPT.format(keyword=kw["keyword"], data=data_points)
-            )
+    if not scored_items:
+        print("[m3] No trend data collected.")
+        return
 
-            db.table("keywords").update(
-                {
-                    "demand_score": scores.get("demand_score"),
-                    "growth_score": scores.get("growth_score"),
-                    "stability_score": scores.get("stability_score"),
-                    "seasonal_score": scores.get("seasonal_score"),
-                    "trend_score": scores.get("trend_score"),
-                    "last_scored_at": "now()",
-                }
-            ).eq("id", kw["id"]).execute()
+    api_calls = 0
+    for batch in _chunks(scored_items, M3_BATCH_SIZE):
+        items_block = "\n".join(
+            f'- "{item["keyword"]}": {item["data"]}' for item in batch
+        )
+        try:
+            result = await ai_bulk(BATCH_SCORE_PROMPT.format(items_block=items_block))
+            api_calls += 1
+            scores_by_kw = {
+                (s.get("keyword") or "").lower().strip(): s
+                for s in result.get("scores", [])
+            }
 
-            print(f"[m3] Scored: {kw['keyword']} → trend_score={scores.get('trend_score')}")
+            for item in batch:
+                scores = scores_by_kw.get(item["keyword"].lower().strip())
+                if not scores:
+                    print(f"[m3] No AI score for: {item['keyword']}")
+                    continue
+
+                db.table("keywords").update(
+                    {
+                        "demand_score": scores.get("demand_score"),
+                        "growth_score": scores.get("growth_score"),
+                        "stability_score": scores.get("stability_score"),
+                        "seasonal_score": scores.get("seasonal_score"),
+                        "trend_score": scores.get("trend_score"),
+                        "last_scored_at": "now()",
+                    }
+                ).eq("id", item["id"]).execute()
+
+                print(f"[m3] Scored: {item['keyword']} → trend_score={scores.get('trend_score')}")
 
         except Exception as e:
-            print(f"[m3] Error for '{kw['keyword']}': {e}")
-            continue
+            print(f"[m3] Batch scoring error: {e}")
+
+        await asyncio.sleep(1)
+
+    print(f"[m3] Done — {api_calls} API call(s) for {len(scored_items)} keyword(s)")

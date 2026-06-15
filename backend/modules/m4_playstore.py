@@ -8,6 +8,7 @@ import asyncio
 from google_play_scraper import search
 from db import get_db
 from ai_client import ai_bulk
+from config import M4_MAX_KEYWORDS_PER_RUN
 
 COMPETE_PROMPT = """
 You are analysing the Android Play Store competitive landscape for a market researcher.
@@ -38,13 +39,12 @@ Return ONLY this JSON, nothing else:
 async def run():
     db = get_db()
 
-    # Process keywords that have trend scores (prioritise validated keywords)
     res = (
         db.table("keywords")
         .select("id, keyword, niche_id")
         .not_.is_("trend_score", "null")
         .order("trend_score", desc=True)
-        .limit(60)
+        .limit(M4_MAX_KEYWORDS_PER_RUN * 2)
         .execute()
     )
 
@@ -52,8 +52,25 @@ async def run():
         print("[m4] No scored keywords to process.")
         return
 
+    processed = 0
     for kw in res.data:
+        if processed >= M4_MAX_KEYWORDS_PER_RUN:
+            break
+
+        # Skip if we already scored competition for this keyword recently
+        existing = (
+            db.table("competitors")
+            .select("competition_score")
+            .eq("keyword_id", kw["id"])
+            .not_.is_("competition_score", "null")
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            continue
+
         await asyncio.sleep(3)
+        processed += 1
         try:
             results = search(
                 kw["keyword"], lang="en", country="in", n_hits=10

@@ -13,7 +13,21 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMMA_MODEL_BULK = os.getenv("GEMMA_MODEL_BULK", "gemma-4-26b-a4b-it")
 GEMMA_MODEL_ANALYZE = os.getenv("GEMMA_MODEL_ANALYZE", "gemma-4-31b-it")
 GEMMA_CONTEXT_TOKENS = int(os.getenv("GEMMA_CONTEXT_TOKENS", "262144"))
-GEMMA_MAX_OUTPUT_TOKENS = int(os.getenv("GEMMA_MAX_OUTPUT_TOKENS", "16384"))
+# Bulk JSON replies are small; 16K output tokens can trigger Gemma API 500 errors.
+GEMMA_MAX_OUTPUT_TOKENS_BULK = int(os.getenv("GEMMA_MAX_OUTPUT_TOKENS_BULK", "2048"))
+GEMMA_MAX_OUTPUT_TOKENS_ANALYZE = int(os.getenv("GEMMA_MAX_OUTPUT_TOKENS_ANALYZE", "8192"))
+
+# Rate limit — default 12 for free tier (15 RPM cap); raise on paid tier via env
+AI_REQUESTS_PER_MINUTE = int(os.getenv("AI_REQUESTS_PER_MINUTE", "12"))
+
+# Per-run caps — raise M2_MAX_BATCHES_PER_RUN after upgrading Gemini API tier
+M2_BATCH_SIZE = int(os.getenv("M2_BATCH_SIZE", "8"))
+M2_MAX_BATCHES_PER_RUN = int(os.getenv("M2_MAX_BATCHES_PER_RUN", "30"))
+M2_REEXPAND_DAYS = int(os.getenv("M2_REEXPAND_DAYS", "7"))
+M3_MAX_KEYWORDS_PER_RUN = int(os.getenv("M3_MAX_KEYWORDS_PER_RUN", "24"))
+M3_BATCH_SIZE = int(os.getenv("M3_BATCH_SIZE", "4"))
+M4_MAX_KEYWORDS_PER_RUN = int(os.getenv("M4_MAX_KEYWORDS_PER_RUN", "30"))
+M7_MAX_KEYWORDS_PER_RUN = int(os.getenv("M7_MAX_KEYWORDS_PER_RUN", "30"))
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
