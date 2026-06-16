@@ -2,7 +2,7 @@
 # api/scheduler_status.py
 from fastapi import APIRouter, HTTPException
 from db import get_db
-from scheduler import trigger_job
+from scheduler import trigger_job, get_schedule_info
 
 router = APIRouter()
 
@@ -15,6 +15,7 @@ TRIGGERABLE_JOBS = [
     "opportunity_scoring",
     "product_concepts",
     "daily_report",
+    "pipeline_cycle",
 ]
 
 
@@ -29,6 +30,12 @@ def get_status():
         .execute()
     )
     return res.data
+
+
+@router.get("/schedule")
+def get_schedule():
+    """Current job intervals (minutes) for the dashboard."""
+    return get_schedule_info()
 
 
 @router.post("/trigger/{job_name}")

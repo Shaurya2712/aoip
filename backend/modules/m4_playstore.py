@@ -32,8 +32,40 @@ Based on this data, score the competitive landscape:
 Consider: number of quality competitors, download concentration, rating quality, update recency.
 
 Return ONLY this JSON, nothing else:
-{{"competition_score": 0, "saturation_score": 0, "reasoning": "brief explanation under 20 words"}}
+{{"competition_score": 0, "saturation_score": 0, "reasoning": "brief note max 40 chars"}}
 """
+
+
+def _heuristic_competition(apps_summary: list[dict]) -> dict:
+    """Rule-based fallback when Gemini fails on competition scoring."""
+    n = len(apps_summary)
+    if n == 0:
+        return {"competition_score": 0, "saturation_score": 0, "reasoning": "No apps found"}
+
+    ratings = [float(a.get("rating") or 0) for a in apps_summary if a.get("rating")]
+    avg_rating = sum(ratings) / len(ratings) if ratings else 2.5
+
+    competition = min(100, int(n * 7 + avg_rating * 12))
+    saturation = min(100, int(n * 9 + max(0, avg_rating - 3) * 10))
+
+    return {
+        "competition_score": competition,
+        "saturation_score": saturation,
+        "reasoning": "Heuristic from app count and ratings",
+    }
+
+
+async def _score_competition(keyword: str, apps_summary: list[dict]) -> dict:
+    try:
+        return await ai_bulk(
+            COMPETE_PROMPT.format(
+                keyword=keyword,
+                apps_summary=str(apps_summary),
+            )
+        )
+    except Exception as e:
+        print(f"[m4] AI scoring failed for '{keyword}': {e} — using heuristic")
+        return _heuristic_competition(apps_summary)
 
 
 async def run():
@@ -113,13 +145,7 @@ async def run():
                     on_conflict="keyword_id,app_id",
                 ).execute()
 
-            # Get AI to score competition level
-            scores = await ai_bulk(
-                COMPETE_PROMPT.format(
-                    keyword=kw["keyword"],
-                    apps_summary=str(apps_summary)
-                )
-            )
+            scores = await _score_competition(kw["keyword"], apps_summary)
 
             # Update competition scores on all competitor rows for this keyword
             db.table("competitors").update(

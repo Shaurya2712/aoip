@@ -27,6 +27,12 @@ import type { JobLog } from '@/lib/types'
 
 const PIPELINE_JOBS = [
   {
+    id: 'pipeline_cycle',
+    label: 'Full pipeline',
+    description: 'm3 → m4 → m7 in one run (trends, Play Store, opportunities)',
+    primary: true,
+  },
+  {
     id: 'keyword_expansion',
     label: 'Keyword expansion',
     description: 'm2 — expand seed keywords via AI',
@@ -48,6 +54,23 @@ const PIPELINE_JOBS = [
   },
 ] as const
 
+type JobSchedule = { interval_minutes?: number; cron?: string }
+
+type ScheduleInfo = {
+  pipeline_chain_enabled?: boolean
+  pipeline_interval_minutes?: number
+  trend_analysis?: JobSchedule
+  playstore_intel?: JobSchedule
+  opportunity_scoring?: JobSchedule
+}
+
+function formatInterval(minutes: number | undefined): string {
+  if (!minutes) return '—'
+  if (minutes < 60) return `${minutes} min`
+  const h = minutes / 60
+  return Number.isInteger(h) ? `${h}h` : `${h.toFixed(1)}h`
+}
+
 type PipelineCounts = {
   keywords: number
   withTrendScore: number
@@ -62,6 +85,18 @@ export default function SchedulerPage() {
   const [loading, setLoading] = useState(true)
   const [triggeringJob, setTriggeringJob] = useState<string | null>(null)
   const [pipeline, setPipeline] = useState<PipelineCounts | null>(null)
+  const [schedule, setSchedule] = useState<ScheduleInfo | null>(null)
+
+  async function loadSchedule() {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/scheduler/schedule`)
+      if (response.ok) {
+        setSchedule((await response.json()) as ScheduleInfo)
+      }
+    } catch {
+      // Backend may be unreachable; schedule banner is optional
+    }
+  }
 
   async function loadPipelineCounts() {
     const [
@@ -100,7 +135,7 @@ export default function SchedulerPage() {
 
       setJobs((data ?? []) as JobLog[])
       setLoading(false)
-      await loadPipelineCounts()
+      await Promise.all([loadPipelineCounts(), loadSchedule()])
     }
 
     loadJobs()
@@ -171,12 +206,26 @@ export default function SchedulerPage() {
           <p className="mt-1 text-slate-600">
             Live job log with realtime updates from Supabase
           </p>
+          {schedule?.pipeline_chain_enabled && (
+            <p className="mt-2 text-sm text-slate-500">
+              Auto pipeline (m3→m4→m7) every{' '}
+              <strong>{formatInterval(schedule.pipeline_interval_minutes)}</strong>
+              {' · '}Only one job runs at a time
+            </p>
+          )}
+          {schedule && !schedule.pipeline_chain_enabled && (
+            <p className="mt-2 text-sm text-slate-500">
+              Auto: trends {formatInterval(schedule.trend_analysis?.interval_minutes)} · Play
+              Store {formatInterval(schedule.playstore_intel?.interval_minutes)} · opportunities{' '}
+              {formatInterval(schedule.opportunity_scoring?.interval_minutes)}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           {PIPELINE_JOBS.map((job) => (
             <Button
               key={job.id}
-              variant={job.id === 'keyword_expansion' ? 'default' : 'outline'}
+              variant={'primary' in job && job.primary ? 'default' : 'outline'}
               onClick={() => triggerJob(job.id, job.label)}
               disabled={!!triggeringJob || !!activeJob}
               title={job.description}

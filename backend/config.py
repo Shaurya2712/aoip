@@ -42,6 +42,29 @@ M3_AI_ESTIMATE_MAX_PER_RUN = int(os.getenv("M3_AI_ESTIMATE_MAX_PER_RUN", "3"))
 M4_MAX_KEYWORDS_PER_RUN = int(os.getenv("M4_MAX_KEYWORDS_PER_RUN", "30"))
 M7_MAX_KEYWORDS_PER_RUN = int(os.getenv("M7_MAX_KEYWORDS_PER_RUN", "30"))
 
+# Scheduler — intervals in minutes (override per job or use SCHEDULER_FAST preset)
+_SCHEDULER_FAST = os.getenv("SCHEDULER_FAST", "false").lower() in ("1", "true", "yes")
+
+def _sched_min(env_key: str, fast_default: int, normal_default: int) -> int:
+    raw = os.getenv(env_key)
+    if raw is not None and raw.strip() != "":
+        return max(1, int(raw))
+    return fast_default if _SCHEDULER_FAST else normal_default
+
+SCHEDULER_M2_INTERVAL_MIN = _sched_min("SCHEDULER_M2_INTERVAL_MIN", 360, 360)
+SCHEDULER_M3_INTERVAL_MIN = _sched_min("SCHEDULER_M3_INTERVAL_MIN", 60, 90)
+SCHEDULER_M4_INTERVAL_MIN = _sched_min("SCHEDULER_M4_INTERVAL_MIN", 45, 60)
+SCHEDULER_M5_INTERVAL_MIN = _sched_min("SCHEDULER_M5_INTERVAL_MIN", 180, 240)
+SCHEDULER_M6_INTERVAL_MIN = _sched_min("SCHEDULER_M6_INTERVAL_MIN", 360, 360)
+SCHEDULER_M7_INTERVAL_MIN = _sched_min("SCHEDULER_M7_INTERVAL_MIN", 60, 120)
+# Chain m3 → m4 → m7 in one job (best for clearing backlog quickly on free tier)
+SCHEDULER_PIPELINE_CHAIN = os.getenv("SCHEDULER_PIPELINE_CHAIN", "true" if _SCHEDULER_FAST else "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+SCHEDULER_PIPELINE_INTERVAL_MIN = _sched_min("SCHEDULER_PIPELINE_INTERVAL_MIN", 90, 120)
+
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "AOIP/1.0")

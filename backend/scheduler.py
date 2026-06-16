@@ -3,13 +3,23 @@
 import threading
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from db import get_db
 from job_exceptions import JobSkipped
+from config import (
+    SCHEDULER_M2_INTERVAL_MIN,
+    SCHEDULER_M3_INTERVAL_MIN,
+    SCHEDULER_M4_INTERVAL_MIN,
+    SCHEDULER_M5_INTERVAL_MIN,
+    SCHEDULER_M6_INTERVAL_MIN,
+    SCHEDULER_M7_INTERVAL_MIN,
+    SCHEDULER_PIPELINE_CHAIN,
+    SCHEDULER_PIPELINE_INTERVAL_MIN,
+)
 
 logger = logging.getLogger(__name__)
 _job_lock = threading.Lock()
@@ -17,6 +27,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 # Populated by start_scheduler(); used for manual triggers
 JOB_REGISTRY: dict = {}
+SCHEDULE_INFO: dict = {}
 
 
 def log_job_start(job_name: str, started_at: datetime) -> str | None:
@@ -114,6 +125,47 @@ def trigger_job(job_name: str) -> bool:
     return True
 
 
+def get_schedule_info() -> dict:
+    """Expose current scheduler intervals for the dashboard."""
+    return dict(SCHEDULE_INFO)
+
+
+async def _run_pipeline_chain(m3_run, m4_run, m7_run) -> str:
+    """Run m3 → m4 → m7 sequentially in one lock slot."""
+    parts: list[str] = []
+    for step_name, fn in (
+        ("m3", m3_run),
+        ("m4", m4_run),
+        ("m7", m7_run),
+    ):
+        try:
+            summary = await fn()
+            parts.append(f"{step_name}: {summary or 'ok'}")
+        except Exception as e:
+            logger.error(f"Pipeline step {step_name} failed: {e}")
+            parts.append(f"{step_name}: error")
+    return " | ".join(parts)
+
+
+def _add_interval_job(
+    scheduler: BackgroundScheduler,
+    job_id: str,
+    coro_factory,
+    interval_min: int,
+    stagger_min: int,
+):
+    """Register an interval job with a staggered first run to avoid pile-ups."""
+    first_run = datetime.now(IST) + timedelta(minutes=stagger_min)
+    scheduler.add_job(
+        lambda j=job_id, c=coro_factory: run_job(j, c),
+        IntervalTrigger(minutes=interval_min, timezone=IST),
+        id=job_id,
+        max_instances=1,
+        next_run_time=first_run,
+    )
+    SCHEDULE_INFO[job_id] = {"interval_minutes": interval_min, "first_run_stagger_min": stagger_min}
+
+
 def start_scheduler():
     from modules.m2_keyword import run as m2_run
     from modules.m3_trends import run as m3_run
@@ -124,7 +176,10 @@ def start_scheduler():
     from modules.m8_analyst import run as m8_run
     from modules.m9_reports import generate_daily
 
-    global JOB_REGISTRY
+    async def pipeline_chain():
+        return await _run_pipeline_chain(m3_run, m4_run, m7_run)
+
+    global JOB_REGISTRY, SCHEDULE_INFO
     JOB_REGISTRY = {
         "keyword_expansion": m2_run,
         "trend_analysis": m3_run,
@@ -134,73 +189,66 @@ def start_scheduler():
         "opportunity_scoring": m7_run,
         "product_concepts": m8_run,
         "daily_report": generate_daily,
+        "pipeline_cycle": pipeline_chain,
+    }
+    SCHEDULE_INFO = {
+        "pipeline_chain_enabled": SCHEDULER_PIPELINE_CHAIN,
+        "pipeline_interval_minutes": SCHEDULER_PIPELINE_INTERVAL_MIN,
     }
 
     s = BackgroundScheduler(timezone=IST, job_defaults={"max_instances": 1, "coalesce": True})
 
-    # Every 6 hours: expand keywords (capped per run — see M2_MAX_BATCHES_PER_RUN)
-    s.add_job(
-        lambda: run_job("keyword_expansion", m2_run),
-        IntervalTrigger(hours=6),
-        id="keyword_expansion",
-        max_instances=1,
-    )
+    _add_interval_job(s, "keyword_expansion", m2_run, SCHEDULER_M2_INTERVAL_MIN, stagger_min=5)
 
-    # Every 6 hours: Google Trends scoring
-    s.add_job(
-        lambda: run_job("trend_analysis", m3_run),
-        IntervalTrigger(hours=6),
-        id="trend_analysis",
-        max_instances=1,
-    )
+    if SCHEDULER_PIPELINE_CHAIN:
+        _add_interval_job(
+            s,
+            "pipeline_cycle",
+            pipeline_chain,
+            SCHEDULER_PIPELINE_INTERVAL_MIN,
+            stagger_min=10,
+        )
+        logger.info(
+            "Pipeline chain enabled: m3→m4→m7 every %s min (individual m3/m4/m7 timers off)",
+            SCHEDULER_PIPELINE_INTERVAL_MIN,
+        )
+    else:
+        _add_interval_job(s, "trend_analysis", m3_run, SCHEDULER_M3_INTERVAL_MIN, stagger_min=10)
+        _add_interval_job(s, "playstore_intel", m4_run, SCHEDULER_M4_INTERVAL_MIN, stagger_min=20)
+        _add_interval_job(
+            s,
+            "opportunity_scoring",
+            m7_run,
+            SCHEDULER_M7_INTERVAL_MIN,
+            stagger_min=30,
+        )
 
-    # Every 4 hours: Play Store competitor data
-    s.add_job(
-        lambda: run_job("playstore_intel", m4_run),
-        IntervalTrigger(hours=4),
-        id="playstore_intel",
-        max_instances=1,
-    )
+    _add_interval_job(s, "review_mining", m5_run, SCHEDULER_M5_INTERVAL_MIN, stagger_min=40)
+    _add_interval_job(s, "community_research", m6_run, SCHEDULER_M6_INTERVAL_MIN, stagger_min=50)
 
-    # Every 8 hours: Mine reviews from competitors
-    s.add_job(
-        lambda: run_job("review_mining", m5_run),
-        IntervalTrigger(hours=8),
-        id="review_mining",
-        max_instances=1,
-    )
-
-    # Every 8 hours: Reddit community research
-    s.add_job(
-        lambda: run_job("community_research", m6_run),
-        IntervalTrigger(hours=8),
-        id="community_research",
-        max_instances=1,
-    )
-
-    # Every 12 hours: Rescore opportunities
-    s.add_job(
-        lambda: run_job("opportunity_scoring", m7_run),
-        IntervalTrigger(hours=12),
-        id="opportunity_scoring",
-        max_instances=1,
-    )
-
-    # Daily at 2am IST: Generate product concepts for top 20
+    # Daily at 2am IST: product concepts for top opportunities
     s.add_job(
         lambda: run_job("product_concepts", m8_run),
-        CronTrigger(hour=2, minute=0, timezone="Asia/Kolkata"),
+        CronTrigger(hour=2, minute=0, timezone=IST),
         id="product_concepts",
         max_instances=1,
     )
+    SCHEDULE_INFO["product_concepts"] = {"cron": "daily 02:00 IST"}
 
-    # Daily at 3am IST: Generate daily report
+    # Daily at 3am IST: daily report
     s.add_job(
         lambda: run_job("daily_report", generate_daily),
-        CronTrigger(hour=3, minute=0, timezone="Asia/Kolkata"),
+        CronTrigger(hour=3, minute=0, timezone=IST),
         id="daily_report",
         max_instances=1,
     )
+    SCHEDULE_INFO["daily_report"] = {"cron": "daily 03:00 IST"}
 
     s.start()
-    logger.info("APScheduler started. All jobs registered.")
+    logger.info(
+        "APScheduler started. pipeline_chain=%s m3=%sm m4=%sm m7=%sm",
+        SCHEDULER_PIPELINE_CHAIN,
+        SCHEDULER_M3_INTERVAL_MIN,
+        SCHEDULER_M4_INTERVAL_MIN,
+        SCHEDULER_M7_INTERVAL_MIN,
+    )

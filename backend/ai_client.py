@@ -22,7 +22,8 @@ SYSTEM_INSTRUCTION = (
     "You are a JSON-only responder. "
     "Always return valid JSON. "
     "Never include markdown code fences, preamble, or explanation. "
-    "Your entire response must be parseable by json.loads()."
+    "Your entire response must be parseable by json.loads(). "
+    "Keep string values short. Do not use double quotes inside string values."
 )
 
 _MAX_RETRIES = 4
@@ -32,18 +33,73 @@ _rate_lock = threading.Lock()
 _request_timestamps: list[float] = []
 
 
+def _strip_markdown_fence(raw: str) -> str:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        if len(parts) >= 2:
+            raw = parts[1]
+            if raw.lstrip().startswith("json"):
+                raw = raw.lstrip()[4:]
+    return raw.strip()
+
+
+def _balance_json(raw: str) -> str:
+    """Best-effort repair for truncated Gemma JSON (unterminated strings, missing braces)."""
+    raw = raw.strip()
+    start = raw.find("{")
+    if start > 0:
+        raw = raw[start:]
+
+    # Drop a trailing incomplete field (common when output is cut mid-string).
+    raw = re.sub(r',?\s*"[^"\\]*(?:\\.[^"\\]*)*$', "", raw)
+    raw = re.sub(r",\s*$", "", raw)
+
+    # If we ended mid-key or mid-colon, drop the dangling fragment.
+    raw = re.sub(r',?\s*"[^"]*"\s*:\s*$', "", raw)
+
+    open_braces = raw.count("{") - raw.count("}")
+    if open_braces > 0:
+        raw += "}" * open_braces
+    return raw
+
+
 def _parse_json_response(raw: str | None) -> dict:
     if not raw:
         raise ValueError("AI returned empty response (no text)")
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+
+    text = _strip_markdown_fence(raw)
+    candidates = [text, _balance_json(text)]
+
+    # If a long reasoning field broke parsing, strip it and retry.
+    if '"ai_reasoning"' in text or '"reasoning"' in text:
+        stripped = re.sub(
+            r',?\s*"(ai_reasoning|reasoning)"\s*:\s*".*$',
+            "",
+            text,
+            flags=re.DOTALL,
+        )
+        candidates.append(_balance_json(stripped))
+
+    last_err: json.JSONDecodeError | None = None
+    for candidate in candidates:
+        try:
+            result = json.loads(candidate)
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError as e:
+            last_err = e
+            continue
+
+    raise ValueError(
+        f"AI returned invalid JSON: {last_err}" if last_err else "AI returned invalid JSON"
+    )
 
 
 def _is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, (json.JSONDecodeError, ValueError)):
+        msg = str(exc).lower()
+        return "json" in msg or "empty response" in msg
     msg = str(exc).upper()
     return any(marker in msg for marker in _RETRYABLE_MARKERS)
 
