@@ -68,14 +68,23 @@ def run_job(job_name: str, coro_factory):
     Only one job runs at a time — no parallel scraping.
     """
     if not _job_lock.acquire(blocking=False):
-        logger.info(f"Skipping {job_name} — another job is running")
+        logger.warning(f"Skipping {job_name} — another job is running")
+        started = datetime.utcnow()
+        log_id = log_job_start(job_name, started)
+        log_job_finish(
+            log_id,
+            "error",
+            "skipped: another job is already running",
+            datetime.utcnow(),
+        )
         return
     started = datetime.utcnow()
     log_id = log_job_start(job_name, started)
     try:
-        asyncio.run(coro_factory())
+        summary = asyncio.run(coro_factory())
         finished = datetime.utcnow()
-        log_job_finish(log_id, "success", "completed", finished)
+        message = summary if isinstance(summary, str) and summary else "completed"
+        log_job_finish(log_id, "success", message, finished)
     except JobSkipped as e:
         finished = datetime.utcnow()
         logger.info(f"Job {job_name} skipped: {e.reason}")

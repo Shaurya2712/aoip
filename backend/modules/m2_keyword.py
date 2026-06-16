@@ -132,3 +132,6 @@ async def run():
             await asyncio.sleep(1)
 
     print(f"[m2] Done — {api_calls} API call(s), {batches_done} batch(es)")
+    if api_calls == 0 and batches_done == 0:
+        return "no work: all seeds recently expanded"
+    return f"{api_calls} API call(s), {batches_done} batch(es)"

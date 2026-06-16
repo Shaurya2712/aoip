@@ -24,8 +24,21 @@ AI_REQUESTS_PER_MINUTE = int(os.getenv("AI_REQUESTS_PER_MINUTE", "12"))
 M2_BATCH_SIZE = int(os.getenv("M2_BATCH_SIZE", "8"))
 M2_MAX_BATCHES_PER_RUN = int(os.getenv("M2_MAX_BATCHES_PER_RUN", "30"))
 M2_REEXPAND_DAYS = int(os.getenv("M2_REEXPAND_DAYS", "7"))
-M3_MAX_KEYWORDS_PER_RUN = int(os.getenv("M3_MAX_KEYWORDS_PER_RUN", "24"))
-M3_BATCH_SIZE = int(os.getenv("M3_BATCH_SIZE", "4"))
+M3_MAX_KEYWORDS_PER_RUN = int(os.getenv("M3_MAX_KEYWORDS_PER_RUN", "5"))
+M3_BATCH_SIZE = int(os.getenv("M3_BATCH_SIZE", "1"))
+# Google Trends (pytrends) — strict on datacenter IPs; use long delays on Render
+M3_PYTRENDS_DELAY_SEC = int(os.getenv("M3_PYTRENDS_DELAY_SEC", "45"))
+M3_PYTRENDS_TIMEOUT_SEC = int(os.getenv("M3_PYTRENDS_TIMEOUT_SEC", "45"))
+M3_PYTRENDS_MAX_RETRIES = int(os.getenv("M3_PYTRENDS_MAX_RETRIES", "2"))
+M3_PYTRENDS_429_BACKOFF_SEC = int(os.getenv("M3_PYTRENDS_429_BACKOFF_SEC", "90"))
+M3_PYTRENDS_429_ABORT_AFTER = int(os.getenv("M3_PYTRENDS_429_ABORT_AFTER", "2"))
+# When Google blocks Trends on Render, estimate scores via AI (uses Gemini quota)
+M3_AI_ESTIMATE_ON_TRENDS_FAIL = os.getenv("M3_AI_ESTIMATE_ON_TRENDS_FAIL", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+M3_AI_ESTIMATE_MAX_PER_RUN = int(os.getenv("M3_AI_ESTIMATE_MAX_PER_RUN", "3"))
 M4_MAX_KEYWORDS_PER_RUN = int(os.getenv("M4_MAX_KEYWORDS_PER_RUN", "30"))
 M7_MAX_KEYWORDS_PER_RUN = int(os.getenv("M7_MAX_KEYWORDS_PER_RUN", "30"))
 

@@ -41,19 +41,27 @@ async def run():
 
     res = (
         db.table("keywords")
-        .select("id, keyword, niche_id")
-        .not_.is_("trend_score", "null")
-        .order("trend_score", desc=True)
-        .limit(M4_MAX_KEYWORDS_PER_RUN * 2)
+        .select("id, keyword, niche_id, trend_score, demand_score")
+        .limit(500)
         .execute()
     )
+    candidates = [
+        k
+        for k in (res.data or [])
+        if k.get("trend_score") is not None or k.get("demand_score") is not None
+    ]
+    candidates.sort(
+        key=lambda k: (k.get("trend_score") or 0, k.get("demand_score") or 0),
+        reverse=True,
+    )
 
-    if not res.data:
-        print("[m4] No scored keywords to process.")
-        return
+    if not candidates:
+        print("[m4] No scored keywords to process (need trend_score from m3 first).")
+        return "0 keywords: none have trend_score yet — run Trend analysis"
 
     processed = 0
-    for kw in res.data:
+    skipped = 0
+    for kw in candidates:
         if processed >= M4_MAX_KEYWORDS_PER_RUN:
             break
 
@@ -67,6 +75,7 @@ async def run():
             .execute()
         )
         if existing.data:
+            skipped += 1
             continue
 
         await asyncio.sleep(3)
@@ -125,3 +134,8 @@ async def run():
         except Exception as e:
             print(f"[m4] Error for '{kw['keyword']}': {e}")
             continue
+
+    print(f"[m4] Done — {processed} keyword(s) processed, {skipped} already had competitors")
+    if processed == 0:
+        return f"0 new keywords ({skipped} already had Play Store data)"
+    return f"{processed} keyword(s) processed"

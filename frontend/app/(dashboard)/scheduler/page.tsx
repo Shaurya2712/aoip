@@ -48,11 +48,46 @@ const PIPELINE_JOBS = [
   },
 ] as const
 
+type PipelineCounts = {
+  keywords: number
+  withTrendScore: number
+  competitors: number
+  opportunities: number
+  communityInsights: number
+}
+
 export default function SchedulerPage() {
   const supabase = createClient()
   const [jobs, setJobs] = useState<JobLog[]>([])
   const [loading, setLoading] = useState(true)
   const [triggeringJob, setTriggeringJob] = useState<string | null>(null)
+  const [pipeline, setPipeline] = useState<PipelineCounts | null>(null)
+
+  async function loadPipelineCounts() {
+    const [
+      { count: keywords },
+      { count: withTrendScore },
+      { count: competitors },
+      { count: opportunities },
+      { count: communityInsights },
+    ] = await Promise.all([
+      supabase.from('keywords').select('*', { count: 'exact', head: true }),
+      supabase
+        .from('keywords')
+        .select('*', { count: 'exact', head: true })
+        .not('trend_score', 'is', null),
+      supabase.from('competitors').select('*', { count: 'exact', head: true }),
+      supabase.from('opportunities').select('*', { count: 'exact', head: true }),
+      supabase.from('community_insights').select('*', { count: 'exact', head: true }),
+    ])
+    setPipeline({
+      keywords: keywords ?? 0,
+      withTrendScore: withTrendScore ?? 0,
+      competitors: competitors ?? 0,
+      opportunities: opportunities ?? 0,
+      communityInsights: communityInsights ?? 0,
+    })
+  }
 
   useEffect(() => {
     async function loadJobs() {
@@ -65,6 +100,7 @@ export default function SchedulerPage() {
 
       setJobs((data ?? []) as JobLog[])
       setLoading(false)
+      await loadPipelineCounts()
     }
 
     loadJobs()
@@ -82,6 +118,7 @@ export default function SchedulerPage() {
             .limit(50)
 
           setJobs((data ?? []) as JobLog[])
+          await loadPipelineCounts()
         }
       )
       .subscribe()
@@ -150,6 +187,48 @@ export default function SchedulerPage() {
           ))}
         </div>
       </div>
+
+      {pipeline && (
+        <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm sm:grid-cols-2 lg:grid-cols-5">
+          <div>
+            <p className="text-slate-500">Keywords</p>
+            <p className="text-xl font-semibold text-slate-900">{pipeline.keywords}</p>
+          </div>
+          <div>
+            <p className="text-slate-500">With trend score (m3)</p>
+            <p className="text-xl font-semibold text-slate-900">{pipeline.withTrendScore}</p>
+          </div>
+          <div>
+            <p className="text-slate-500">Competitors (m4)</p>
+            <p className="text-xl font-semibold text-slate-900">{pipeline.competitors}</p>
+          </div>
+          <div>
+            <p className="text-slate-500">Opportunities (m7)</p>
+            <p className="text-xl font-semibold text-slate-900">{pipeline.opportunities}</p>
+          </div>
+          <div>
+            <p className="text-slate-500">Community insights (m6)</p>
+            <p className="text-xl font-semibold text-slate-900">{pipeline.communityInsights}</p>
+          </div>
+        </div>
+      )}
+
+      {pipeline && pipeline.withTrendScore === 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Pipeline is blocked at <strong>Trend analysis (m3)</strong>. Keywords exist but none have{' '}
+          <code className="text-xs">trend_score</code> yet — run Trend analysis after deploying the
+          latest backend. Google Trends often 429s on Render; the job can still AI-estimate a few
+          keywords per run.
+        </div>
+      )}
+
+      {pipeline && pipeline.communityInsights === 0 && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <strong>Community</strong> is empty until m6 runs with real Reddit API credentials on
+          Render (<code className="text-xs">REDDIT_CLIENT_ID</code> /{' '}
+          <code className="text-xs">REDDIT_CLIENT_SECRET</code>).
+        </div>
+      )}
 
       {activeJob && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
